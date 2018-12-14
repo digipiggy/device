@@ -1,19 +1,22 @@
 #include "math.h"
 #include "neopixel.h"
 
-#define CODE_PIN A1
+#define CODE_PIN D6
 #define CODE_WIFI 2
 #define PIXEL_PIN D2
 #define PIXEL_COUNT 32
+#define PIXEL_BRIGHTNESS 50
 #define PIXEL_TYPE WS2812B
+#define ST_1B_EMPTY 0xFF
 #define ST_4B_EMPTY 0xFFFFFFFF
 #define ST_OFFSET 200
 #define ST_OFFSET_VALUE 1
 #define ST_OFFSET_PROMISE 5
 #define ST_OFFSET_COLOR 9
 #define PIXEL_COLOR_DARK 0
-#define PIXEL_COLOR_WIFI 255
 #define PIXEL_COLOR_DEFAULT 2677760
+
+SYSTEM_THREAD(ENABLED);
 
 Adafruit_NeoPixel strip(PIXEL_COUNT, PIXEL_PIN, PIXEL_TYPE);
 
@@ -41,42 +44,6 @@ void setup()
     
     strip.begin();
     strip.show();
-}
-
-void handleDeviceEvent(const char *event, const char *data)
-{
-    String evt = event;
-    String d = data;
-    int eventIndex = evt.indexOf("/");
-    if (eventIndex > -1)
-    {
-        String eventName = evt.substring(eventIndex + 1);
-        
-        int i = -1;
-        for (i = 0; i <= arraySize(commands); i++)
-        {
-            if (eventName.equals(commands[i])) break;
-        }
-  
-        switch (i)
-        {
-            case 0:
-                bucketReset(d);
-                break;
-                
-            case 1:
-                bucketToggle(d);
-                break;
-                
-            case 2:
-                bucketUpdate(d);
-                break;
-                
-            case 3:
-                bucketColor(d);
-                break;
-        }
-    }
 }
 
 void loop()
@@ -153,7 +120,7 @@ void showBuckets()
         }
     }
     
-    strip.setBrightness(30);
+    strip.setBrightness(PIXEL_BRIGHTNESS);
     strip.show();
 }
 
@@ -178,7 +145,7 @@ void showRainbow()
             }
         
             strip.show();
-            strip.setBrightness(30);
+            strip.setBrightness(PIXEL_BRIGHTNESS);
             delay(20);
         }
     }
@@ -279,6 +246,42 @@ uint32_t getBucketColor(int bucket)
     }
 
     return value;
+}
+
+void handleDeviceEvent(const char *event, const char *data)
+{
+    String evt = event;
+    String d = data;
+    int eventIndex = evt.indexOf("/");
+    if (eventIndex > -1)
+    {
+        String eventName = evt.substring(eventIndex + 1);
+        
+        int i = -1;
+        for (i = 0; i <= arraySize(commands); i++)
+        {
+            if (eventName.equals(commands[i])) break;
+        }
+  
+        switch (i)
+        {
+            case 0:
+                bucketReset(d);
+                break;
+                
+            case 1:
+                bucketToggle(d);
+                break;
+                
+            case 2:
+                bucketUpdate(d);
+                break;
+                
+            case 3:
+                bucketColor(d);
+                break;
+        }
+    }
 }
 
 int bucketReset(String command)
