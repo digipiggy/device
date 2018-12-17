@@ -175,7 +175,12 @@ void updateDisplay()
     {
         uint32_t color = getBucketColor(i);
 
-        int level = floor(getBucketValue(i) * step);
+        int level = 0;
+        float value = getBucketValue(i);
+        if (value > 0) {
+            level = max(floor(value * step), 1);
+        }
+        
         int start = (i - 1) * step;
         for (int j = start; j < (start + level); j++)
         {
