@@ -34,10 +34,10 @@ void setup()
 {
     Particle.subscribe(System.deviceID(), handleDeviceEvent, MY_DEVICES);
     
-    Particle.function("reset", bucketReset);
-    Particle.function("toggle", bucketToggle);
-    Particle.function("update", bucketUpdate);
-    Particle.function("color", bucketColor);
+    Particle.function("reset", goalReset);
+    Particle.function("toggle", goalToggle);
+    Particle.function("update", goalUpdate);
+    Particle.function("color", goalColor);
     
     pinMode(CODE_PIN, OUTPUT);
     updateDisplay();
@@ -71,7 +71,7 @@ void loop()
         }
         else
         {
-            showBuckets();
+            showGoals();
         }
     }
 }
@@ -94,7 +94,7 @@ void showWarning(int code)
     delay(2000);
 }
 
-void showBuckets()
+void showGoals()
 {
     for (int i = 0; i < PIXEL_COUNT; i++)
     {
@@ -156,6 +156,7 @@ void showRainbow()
 
 void updateDisplay()
 {
+    // clear all pixels
     for (int i = 0; i < PIXEL_COUNT; i++)
     {
         pixelDisplay[i] = false;
@@ -163,61 +164,71 @@ void updateDisplay()
         pixelColor[i] = (uint32_t)PIXEL_COLOR_DARK;
     } 
     
-    int step = 32;
-    int buckets = getBucketsEnabled();
-    if (buckets == 2) {
-        step = 16;
-    } else if (buckets > 2) {
-        step = 8;
-    }
-    
-    for (int i = 1; i <= buckets; i++)
-    {
-        uint32_t color = getBucketColor(i);
-
-        int level = 0;
-        float value = getBucketValue(i);
-        if (value > 0) {
-            level = max(floor(value * step), 1);
-        }
-        
-        int start = (i - 1) * step;
-        for (int j = start; j < (start + level); j++)
-        {
-            pixelDisplay[j] = true;
-            pixelColor[j] = color;
-        }
-        
-        int promiseLevel = ceil(getBucketPromise(i) * step);
-        if (promiseLevel > 0)
-        {
-            int promiseStart = start + level;
-            for (int j = promiseStart; j < (promiseStart + promiseLevel); j++)
-            {
-                pixelDimmed[j] = true;
-                pixelColor[j] = color;
-            }
-        }
-    }
-}
-
-int getBucketsEnabled()
-{
-    int result = 0;
+    // determine which goals and how many are enabled
+    int8_t totalGoalsEnabled = 0;
+    int8_t enabledGoals[4];
     for (int i = 0; i < 4; i++)
     {
         int addr = i * ST_OFFSET;
         int8_t enabled = EEPROM.read(addr);
-        result += enabled;
+        enabledGoals[i] = enabled;
+        if (enabled == 1)
+        {
+            totalGoalsEnabled++;    
+        }
+    }
+
+    // set appropriate pixel 'step'
+    int step = 32;
+    if (totalGoalsEnabled == 2)
+    {
+        step = 16;
+    }
+    else if (totalGoalsEnabled > 2)
+    {
+        step = 8;
     }
     
-    return result;
+    int stepCount = 0;
+    for (int i = 0; i < 4; i++)
+    {
+        if (enabledGoals[i] == 1)
+        {
+            uint32_t color = getGoalColor(i);
+    
+            int level = 0;
+            float value = getGoalValue(i);
+            if (value > 0) {
+                level = max(floor(value * step), 1);
+            }
+            
+            int start = stepCount * step;
+            for (int j = start; j < (start + level); j++)
+            {
+                pixelDisplay[j] = true;
+                pixelColor[j] = color;
+            }
+            
+            int promiseLevel = ceil(getGoalPromise(i) * step);
+            if (promiseLevel > 0)
+            {
+                int promiseStart = start + level;
+                for (int j = promiseStart; j < (promiseStart + promiseLevel); j++)
+                {
+                    pixelDimmed[j] = true;
+                    pixelColor[j] = color;
+                }
+            }
+            
+            stepCount++;
+        }
+    }
 }
 
-float getBucketValue(int bucket)
+float getGoalValue(int goalIndex)
 {
     float value;
-    int addr = ((bucket - 1) * ST_OFFSET) + ST_OFFSET_VALUE;
+    int addr = (goalIndex * ST_OFFSET) + ST_OFFSET_VALUE;
     EEPROM.get(addr, value);
     if (value == ST_4B_EMPTY)
     {
@@ -227,10 +238,10 @@ float getBucketValue(int bucket)
     return value;
 }
 
-float getBucketPromise(int bucket)
+float getGoalPromise(int goalIndex)
 {
     float value;
-    int addr = ((bucket - 1) * ST_OFFSET) + ST_OFFSET_PROMISE;
+    int addr = (goalIndex * ST_OFFSET) + ST_OFFSET_PROMISE;
     EEPROM.get(addr, value);
     if (value == ST_4B_EMPTY)
     {
@@ -240,10 +251,10 @@ float getBucketPromise(int bucket)
     return value;
 }
 
-uint32_t getBucketColor(int bucket)
+uint32_t getGoalColor(int goalIndex)
 {
     uint32_t value;
-    int addr = ((bucket - 1) * ST_OFFSET) + ST_OFFSET_COLOR;
+    int addr = (goalIndex * ST_OFFSET) + ST_OFFSET_COLOR;
     EEPROM.get(addr, value);
     if (value == ST_4B_EMPTY)
     {
@@ -271,64 +282,57 @@ void handleDeviceEvent(const char *event, const char *data)
         switch (i)
         {
             case 0:
-                bucketReset(d);
+                goalReset(d);
                 break;
                 
             case 1:
-                bucketToggle(d);
+                goalToggle(d);
                 break;
                 
             case 2:
-                bucketUpdate(d);
+                goalUpdate(d);
                 break;
                 
             case 3:
-                bucketColor(d);
+                goalColor(d);
                 break;
         }
     }
 }
 
-int bucketReset(String command)
+int goalReset(String command)
 {
     EEPROM.clear();
     updateDisplay();
     return 0;
 }
 
-int bucketToggle(String command)
+int goalToggle(String command)
 {
-    if (command.length() > 0)
+    // ex: 1|1|0|0
+    char buffer[8];
+    command.toCharArray(buffer, 8);
+    for (int i = 0; i < 4; i++)
     {
-        int index = command.indexOf("|");
-        if (index > -1)
+        int8_t enabled;
+        if (i == 0)
         {
-            int bucket = command.substring(0, 1).toInt();
-            int8_t value = command.substring(index + 1).toInt();
-            
-            if (value == 1) {
-                for (int i = (bucket - 1); i >= 0; i--) {
-                    int addr = i * ST_OFFSET;
-                    EEPROM.write(addr, value);
-                }
-            }
-            else
-            {
-                for (int i = (bucket - 1); i < 4; i++) {
-                    int addr = i * ST_OFFSET;
-                    EEPROM.write(addr, value);
-                }
-            }
-
-            updateDisplay();
-            return 0;
+            enabled = atoi(strtok(buffer, "|"));
         }
+        else
+        {
+            enabled = atoi(strtok(NULL, "|"));
+        }
+        
+        int addr = i * ST_OFFSET;
+        EEPROM.write(addr, enabled);
     }
     
-    return -1;
+    updateDisplay();
+    return 0;
 }
 
-int bucketUpdate(String command)
+int goalUpdate(String command)
 {
     if (command.length() > 0)
     {
@@ -338,15 +342,15 @@ int bucketUpdate(String command)
             int promiseIndex = command.indexOf("|", valueIndex + 1);
             if (promiseIndex > -1)
             {
-                int bucket = command.substring(0, 1).toInt();
-                float previousValue = getBucketValue(bucket);
+                int goal = command.substring(0, 1).toInt();
+                float previousValue = getGoalValue(goal);
                 
                 float value = min(command.substring(valueIndex + 1, promiseIndex).toFloat(), 1.0);
-                int valueAddr = ((bucket - 1) * ST_OFFSET) + ST_OFFSET_VALUE;
+                int valueAddr = ((goal - 1) * ST_OFFSET) + ST_OFFSET_VALUE;
                 EEPROM.put(valueAddr, value);
                 
                 float promise = min(command.substring(promiseIndex + 1).toFloat(), (1.0 - value));
-                int promiseAddr = ((bucket - 1) * ST_OFFSET) + ST_OFFSET_PROMISE;
+                int promiseAddr = ((goal - 1) * ST_OFFSET) + ST_OFFSET_PROMISE;
                 EEPROM.put(promiseAddr, promise);
 
                 updateDisplay();
@@ -363,17 +367,17 @@ int bucketUpdate(String command)
     return -1;
 }
 
-int bucketColor(String command)
+int goalColor(String command)
 {
     if (command.length() > 0)
     {
         int index = command.indexOf("|");
         if (index > -1)
         {
-            int bucket = command.substring(0, 1).toInt();
+            int goal = command.substring(0, 1).toInt();
             uint32_t value = command.substring(index + 1).toInt();
             
-            int addr = (bucket - 1) * ST_OFFSET + ST_OFFSET_COLOR;
+            int addr = (goal - 1) * ST_OFFSET + ST_OFFSET_COLOR;
             EEPROM.put(addr, value);
 
             updateDisplay();
