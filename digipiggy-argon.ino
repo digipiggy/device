@@ -30,6 +30,8 @@ bool goalReached;
 bool showingRainbow;
 String disconnected = "";
 
+// System Functions
+
 void setup()
 {
     Particle.subscribe(System.deviceID(), handleDeviceEvent, MY_DEVICES);
@@ -75,6 +77,8 @@ void loop()
         }
     }
 }
+
+// Display Functions
 
 void showWarning(int code)
 {
@@ -154,6 +158,24 @@ void showRainbow()
     goalReached = false;
 }
 
+uint32_t colorWheel(byte pos)
+{
+    if (pos < 85)
+    {
+        return strip.Color(pos * 3, 255 - pos * 3, 0);
+    }
+    else if (pos < 170)
+    {
+        pos -= 85;
+        return strip.Color(255 - pos * 3, 0, pos * 3);
+    }
+    else
+    {
+        pos -= 170;
+        return strip.Color(0, pos * 3, 255 - pos * 3);
+    }
+}
+
 void updateDisplay()
 {
     // clear all pixels
@@ -189,6 +211,7 @@ void updateDisplay()
         step = 8;
     }
     
+    // populate display arrays
     int stepCount = 0;
     for (int i = 0; i < 4; i++)
     {
@@ -224,6 +247,8 @@ void updateDisplay()
         }
     }
 }
+
+// EEPROM Functions
 
 float getGoalValue(int goalIndex)
 {
@@ -263,6 +288,8 @@ uint32_t getGoalColor(int goalIndex)
 
     return value;
 }
+
+// Event & Function Handlers
 
 void handleDeviceEvent(const char *event, const char *data)
 {
@@ -307,11 +334,10 @@ int goalReset(String command)
     return 0;
 }
 
-int goalToggle(String command)
+int goalToggle(String command) // ex: 1|1|0|0
 {
-    // ex: 1|1|0|0
     char buffer[8];
-    command.toCharArray(buffer, 8);
+    command.toCharArray(buffer, sizeof(buffer));
     for (int i = 0; i < 4; i++)
     {
         int8_t enabled;
@@ -332,76 +358,78 @@ int goalToggle(String command)
     return 0;
 }
 
-int goalUpdate(String command)
+int goalUpdate(String command) // ex: 0.50,0.00|0.80,0.00|0.20,0.20|0.60,0.20
 {
-    if (command.length() > 0)
+    bool full = false;
+    char commandBuffer[40];
+    command.toCharArray(commandBuffer, sizeof(commandBuffer));
+    String values[4];
+    for (int i = 0; i < 4; i++)
     {
-        int valueIndex = command.indexOf("|");
-        if (valueIndex > -1)
+        char * goalAndPromise;
+        if (i == 0)
         {
-            int promiseIndex = command.indexOf("|", valueIndex + 1);
-            if (promiseIndex > -1)
-            {
-                int goal = command.substring(0, 1).toInt();
-                float previousValue = getGoalValue(goal);
-                
-                float value = min(command.substring(valueIndex + 1, promiseIndex).toFloat(), 1.0);
-                int valueAddr = ((goal - 1) * ST_OFFSET) + ST_OFFSET_VALUE;
-                EEPROM.put(valueAddr, value);
-                
-                float promise = min(command.substring(promiseIndex + 1).toFloat(), (1.0 - value));
-                int promiseAddr = ((goal - 1) * ST_OFFSET) + ST_OFFSET_PROMISE;
-                EEPROM.put(promiseAddr, promise);
+            goalAndPromise = strtok(commandBuffer, "|");
+        }
+        else
+        {
+            goalAndPromise = strtok(NULL, "|");
+        }
+        
+        String temp = goalAndPromise;
+        values[i] = temp;
+    }
+    
+    char valueBuffer[10];
+    for (int i = 0; i < 4; i++)
+    {
+        values[i].toCharArray(valueBuffer, sizeof(valueBuffer));
+        
+        int goalOffset = i * ST_OFFSET;
+        float previousGoal = getGoalValue(i);
+        float goal = min(atof(strtok(valueBuffer, ",")), 1.0);
+        int goalAddr = goalOffset + ST_OFFSET_VALUE;
+        EEPROM.put(goalAddr, goal);
 
-                updateDisplay();
-                if (value == 1.0 && previousValue < 1.0)
-                {
-                    goalReached = true;
-                }
-                
-                return 0;
+        if (goal == 1.0 && previousGoal < 1.0)
+        {
+            int8_t enabled = EEPROM.read(goalOffset);
+            if (enabled)
+            {
+                full = true;
             }
         }
+        
+        float promise = min(atof(strtok(NULL, ",")), (1.0 - goal));
+        int promiseAddr = goalOffset + ST_OFFSET_PROMISE;
+        EEPROM.put(promiseAddr, promise);
     }
     
-    return -1;
+    goalReached = full;
+    updateDisplay();
+    return 0;
 }
 
-int goalColor(String command)
+int goalColor(String command) // ex: 16763955|1073100|43087|14422029
 {
-    if (command.length() > 0)
+    char buffer[36];
+    command.toCharArray(buffer, sizeof(buffer));
+    for (int i = 0; i < 4; i++)
     {
-        int index = command.indexOf("|");
-        if (index > -1)
+        int color;
+        if (i == 0)
         {
-            int goal = command.substring(0, 1).toInt();
-            uint32_t value = command.substring(index + 1).toInt();
-            
-            int addr = (goal - 1) * ST_OFFSET + ST_OFFSET_COLOR;
-            EEPROM.put(addr, value);
-
-            updateDisplay();
-            return 0;
+            color = atoi(strtok(buffer, "|"));
         }
+        else
+        {
+            color = atoi(strtok(NULL, "|"));
+        }
+        
+        int addr = (i * ST_OFFSET) + ST_OFFSET_COLOR;
+        EEPROM.put(addr, color);
     }
     
-    return -1;
-}
-
-uint32_t colorWheel(byte pos)
-{
-    if (pos < 85)
-    {
-        return strip.Color(pos * 3, 255 - pos * 3, 0);
-    }
-    else if (pos < 170)
-    {
-        pos -= 85;
-        return strip.Color(255 - pos * 3, 0, pos * 3);
-    }
-    else
-    {
-        pos -= 170;
-        return strip.Color(0, pos * 3, 255 - pos * 3);
-    }
+    updateDisplay();
+    return 0;
 }
