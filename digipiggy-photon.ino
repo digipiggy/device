@@ -1,9 +1,9 @@
 #include "math.h"
 #include "neopixel.h"
 
-#define CODE_PIN D6
+#define CODE_PIN D0
 #define CODE_WIFI 2
-#define PIXEL_PIN D2
+#define PIXEL_PIN D3
 #define PIXEL_COUNT 32
 #define PIXEL_BRIGHTNESS 50
 #define PIXEL_TYPE WS2812B
@@ -16,11 +16,12 @@
 #define PIXEL_COLOR_DARK 0
 #define PIXEL_COLOR_DEFAULT 2677760
 
+//this needs to be used for firmware upload
+//PRODUCT_ID();
+PRODUCT_VERSION(1);
 SYSTEM_THREAD(ENABLED);
 
 Adafruit_NeoPixel strip(PIXEL_COUNT, PIXEL_PIN, PIXEL_TYPE);
-
-String commands[] = { "reset", "toggle", "update", "color" };
 
 bool pixelDisplay[PIXEL_COUNT];
 bool pixelDimmed[PIXEL_COUNT];
@@ -28,7 +29,6 @@ uint32_t pixelColor[PIXEL_COUNT];
 
 bool goalReached;
 bool showingRainbow;
-String disconnected = "";
 
 // System Functions
 
@@ -36,8 +36,7 @@ void setup()
 {
     System.set(SYSTEM_CONFIG_SOFTAP_PREFIX, "DIGIPIGGY");
     
-    Particle.subscribe(System.deviceID(), handleDeviceEvent, MY_DEVICES);
-    
+    Particle.function("clear", goalClear);
     Particle.function("reset", goalReset);
     Particle.function("toggle", goalToggle);
     Particle.function("update", goalUpdate);
@@ -54,21 +53,10 @@ void loop()
 {
     if (!Particle.connected())
     {
-        if (disconnected == "")
-        {
-            disconnected = Time.format(Time.now(), TIME_FORMAT_ISO8601_FULL);
-        }
-        
         showWarning(CODE_WIFI);
     }
     else
     {
-        if (disconnected != "")
-        {
-            Particle.publish("device/online", disconnected, PRIVATE);
-            disconnected = "";
-        }
-        
         if (goalReached && !showingRainbow)
         {
             showRainbow();
@@ -113,7 +101,7 @@ void showGoals()
             
             if (pixelDimmed[i])
             {
-                strip.setColorDimmed(i, r, g, b, 128);
+                strip.setColorDimmed(i, r, g, b, 180);
             }
             else
             {
@@ -293,51 +281,28 @@ uint32_t getGoalColor(int goalIndex)
 
 // Event & Function Handlers
 
-void handleDeviceEvent(const char *event, const char *data)
+int goalClear(String command)
 {
-    String evt = event;
-    String d = data;
-    int eventIndex = evt.indexOf("/");
-    if (eventIndex > -1)
-    {
-        String eventName = evt.substring(eventIndex + 1);
-        
-        int i = -1;
-        for (i = 0; i <= arraySize(commands); i++)
-        {
-            if (eventName.equals(commands[i])) break;
-        }
-  
-        switch (i)
-        {
-            case 0:
-                goalReset(d);
-                break;
-                
-            case 1:
-                goalToggle(d);
-                break;
-                
-            case 2:
-                goalUpdate(d);
-                break;
-                
-            case 3:
-                goalColor(d);
-                break;
-        }
-    }
+    EEPROM.clear();
+    updateDisplay();
+    Particle.publish("device/clear", PRIVATE);
+    return 0;
 }
 
 int goalReset(String command)
 {
-    EEPROM.clear();
+    goalToggle("0|0|0|0");
+    goalUpdate("0.00,0.00|0.00,0.00|0.00,0.00|0.00,0.00");
     updateDisplay();
+    Particle.publish("device/reset", PRIVATE);
     return 0;
 }
 
 int goalToggle(String command) // ex: 1|1|0|0
 {
+    // TODO: add better validation since device is being contacted
+    // directly from the client application
+    
     char buffer[8];
     command.toCharArray(buffer, sizeof(buffer));
     for (int i = 0; i < 4; i++)
@@ -357,11 +322,15 @@ int goalToggle(String command) // ex: 1|1|0|0
     }
     
     updateDisplay();
+    Particle.publish("device/toggle", command, PRIVATE);
     return 0;
 }
 
 int goalUpdate(String command) // ex: 0.50,0.00|0.80,0.00|0.20,0.20|0.60,0.20
 {
+    // TODO: add better validation since device is being contacted
+    // directly from the client application
+    
     bool full = false;
     char commandBuffer[40];
     command.toCharArray(commandBuffer, sizeof(commandBuffer));
@@ -409,11 +378,15 @@ int goalUpdate(String command) // ex: 0.50,0.00|0.80,0.00|0.20,0.20|0.60,0.20
     
     goalReached = full;
     updateDisplay();
+    Particle.publish("device/update", command, PRIVATE);
     return 0;
 }
 
 int goalColor(String command) // ex: 16763955|1073100|43087|14422029
 {
+    // TODO: add better validation since device is being contacted
+    // directly from the client application
+    
     char buffer[36];
     command.toCharArray(buffer, sizeof(buffer));
     for (int i = 0; i < 4; i++)
@@ -433,5 +406,6 @@ int goalColor(String command) // ex: 16763955|1073100|43087|14422029
     }
     
     updateDisplay();
+    Particle.publish("device/color", command, PRIVATE);
     return 0;
 }
