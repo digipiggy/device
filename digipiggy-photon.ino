@@ -14,11 +14,10 @@
 #define ST_OFFSET_PROMISE 5
 #define ST_OFFSET_COLOR 9
 #define PIXEL_COLOR_DARK 0
-#define PIXEL_COLOR_DEFAULT 2677760
+#define PIXEL_COLOR_DEFAULT 1073100
 
-//this needs to be used for firmware upload
 //PRODUCT_ID();
-PRODUCT_VERSION(1);
+PRODUCT_VERSION(3);
 SYSTEM_THREAD(ENABLED);
 
 Adafruit_NeoPixel strip(PIXEL_COUNT, PIXEL_PIN, PIXEL_TYPE);
@@ -27,6 +26,7 @@ bool pixelDisplay[PIXEL_COUNT];
 bool pixelDimmed[PIXEL_COUNT];
 uint32_t pixelColor[PIXEL_COUNT];
 
+bool isNew;
 bool goalReached;
 bool showingRainbow;
 
@@ -35,16 +35,19 @@ bool showingRainbow;
 void setup()
 {
     System.set(SYSTEM_CONFIG_SOFTAP_PREFIX, "DIGIPIGGY");
-    
-    Particle.function("clear", goalClear);
+
+    String event = System.deviceID();
+    event.concat("device/reset");
+    Particle.subscribe(event, deviceReset, MY_DEVICES);
+
     Particle.function("reset", goalReset);
     Particle.function("toggle", goalToggle);
     Particle.function("update", goalUpdate);
     Particle.function("color", goalColor);
-    
+
     pinMode(CODE_PIN, OUTPUT);
     updateDisplay();
-    
+
     strip.begin();
     strip.show();
 }
@@ -53,11 +56,22 @@ void loop()
 {
     if (!Particle.connected())
     {
-        showWarning(CODE_WIFI);
+        if (WiFi.listening())
+        {
+            showListening();
+        }
+        else
+        {
+            showWarning(CODE_WIFI);
+        }
     }
     else
     {
-        if (goalReached && !showingRainbow)
+        if (isNew)
+        {
+            showHello();
+        }
+        else if (goalReached && !showingRainbow)
         {
             showRainbow();
         }
@@ -74,18 +88,28 @@ void showWarning(int code)
 {
     switch (code)
     {
-        case CODE_WIFI: // WiFi connectivity
-            for (int i = 0; i < CODE_WIFI; i++)
-            {
-                digitalWrite(CODE_PIN, HIGH);
-                delay(250);
-                digitalWrite(CODE_PIN, LOW);
-                delay(250);
-            }
-            break;
+    case CODE_WIFI: // WiFi connectivity
+        for (int i = 0; i < CODE_WIFI; i++)
+        {
+            digitalWrite(CODE_PIN, HIGH);
+            delay(250);
+            digitalWrite(CODE_PIN, LOW);
+            delay(250);
+        }
+        break;
     }
-    
+
     delay(2000);
+}
+
+void clearDisplay()
+{
+    for (int i = 0; i < PIXEL_COUNT; i++)
+    {
+        strip.setPixelColor(i, (uint32_t)PIXEL_COLOR_DARK);
+    }
+
+    strip.show();
 }
 
 void showGoals()
@@ -95,10 +119,10 @@ void showGoals()
         if (pixelDisplay[i] || pixelDimmed[i])
         {
             uint8_t
-              r = (uint8_t)(pixelColor[i] >> 16),
-              g = (uint8_t)(pixelColor[i] >> 8),
-              b = (uint8_t)pixelColor[i];
-            
+                r = (uint8_t)(pixelColor[i] >> 16),
+                g = (uint8_t)(pixelColor[i] >> 8),
+                b = (uint8_t)pixelColor[i];
+
             if (pixelDimmed[i])
             {
                 strip.setColorDimmed(i, r, g, b, 180);
@@ -108,12 +132,12 @@ void showGoals()
                 strip.setColor(i, r, g, b);
             }
         }
-        else 
+        else
         {
             strip.setPixelColor(i, (uint32_t)PIXEL_COLOR_DARK);
         }
     }
-    
+
     strip.setBrightness(PIXEL_BRIGHTNESS);
     strip.show();
 }
@@ -121,14 +145,9 @@ void showGoals()
 void showRainbow()
 {
     showingRainbow = true;
-    
-    for (int i = 0; i < PIXEL_COUNT; i++)
-    {
-        strip.setPixelColor(i, (uint32_t)PIXEL_COLOR_DARK);
-    }
-    
-    strip.show();
-    
+
+    clearDisplay();
+
     for (int i = 0; i < 3; i++)
     {
         for (int j = 0; j < 256; j++)
@@ -137,13 +156,13 @@ void showRainbow()
             {
                 strip.setPixelColor(k, colorWheel((k + j) & 255));
             }
-        
-            strip.show();
+
             strip.setBrightness(PIXEL_BRIGHTNESS);
+            strip.show();
             delay(20);
         }
     }
-    
+
     showingRainbow = false;
     goalReached = false;
 }
@@ -166,27 +185,57 @@ uint32_t colorWheel(byte pos)
     }
 }
 
+void showListening()
+{
+    clearDisplay();
+
+    int pixels[] = {0, 1, 8, 9, 10, 11, 16, 17, 18, 19, 20, 21, 24, 25, 26, 27, 28, 29, 30, 31};
+    for (int i = 0; i < arraySize(pixels); i++)
+    {
+        strip.setPixelColor(pixels[i], (uint32_t)PIXEL_COLOR_DEFAULT);
+    }
+
+    strip.setBrightness(PIXEL_BRIGHTNESS);
+    strip.show();
+}
+
+void showHello()
+{
+    clearDisplay();
+
+    int pixels[] = {0, 1, 2, 3, 4, 5, 6, 7, 11, 12, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 30, 31};
+    for (int i = 0; i < arraySize(pixels); i++)
+    {
+        strip.setPixelColor(pixels[i], (uint32_t)PIXEL_COLOR_DEFAULT);
+    }
+
+    strip.setBrightness(PIXEL_BRIGHTNESS);
+    strip.show();
+}
+
 void updateDisplay()
 {
+    isNew = getIsNew();
+
     // clear all pixels
     for (int i = 0; i < PIXEL_COUNT; i++)
     {
         pixelDisplay[i] = false;
         pixelDimmed[i] = false;
         pixelColor[i] = (uint32_t)PIXEL_COLOR_DARK;
-    } 
-    
+    }
+
     // determine which goals and how many are enabled
-    int8_t totalGoalsEnabled = 0;
-    int8_t enabledGoals[4];
+    uint8_t totalGoalsEnabled = 0;
+    uint8_t enabledGoals[4];
     for (int i = 0; i < 4; i++)
     {
         int addr = i * ST_OFFSET;
-        int8_t enabled = EEPROM.read(addr);
+        uint8_t enabled = EEPROM.read(addr);
         enabledGoals[i] = enabled;
         if (enabled == 1)
         {
-            totalGoalsEnabled++;    
+            totalGoalsEnabled++;
         }
     }
 
@@ -200,7 +249,7 @@ void updateDisplay()
     {
         step = 8;
     }
-    
+
     // populate display arrays
     int stepCount = 0;
     for (int i = 0; i < 4; i++)
@@ -208,20 +257,21 @@ void updateDisplay()
         if (enabledGoals[i] == 1)
         {
             uint32_t color = getGoalColor(i);
-    
+
             int level = 0;
             float value = getGoalValue(i);
-            if (value > 0) {
+            if (value > 0)
+            {
                 level = max(floor(value * step), 1);
             }
-            
+
             int start = stepCount * step;
             for (int j = start; j < (start + level); j++)
             {
                 pixelDisplay[j] = true;
                 pixelColor[j] = color;
             }
-            
+
             int promiseLevel = ceil(getGoalPromise(i) * step);
             if (promiseLevel > 0)
             {
@@ -232,13 +282,31 @@ void updateDisplay()
                     pixelColor[j] = color;
                 }
             }
-            
+
             stepCount++;
         }
     }
 }
 
 // EEPROM Functions
+
+void setIsNew(uint8_t value)
+{
+    int addr = (4 * ST_OFFSET) + ST_OFFSET_VALUE;
+    EEPROM.write(addr, value);
+}
+
+bool getIsNew()
+{
+    int addr = (4 * ST_OFFSET) + ST_OFFSET_VALUE;
+    uint8_t value = EEPROM.read(addr);
+    if (value == ST_1B_EMPTY)
+    {
+        return true;
+    }
+
+    return false;
+}
 
 float getGoalValue(int goalIndex)
 {
@@ -281,20 +349,26 @@ uint32_t getGoalColor(int goalIndex)
 
 // Event & Function Handlers
 
-int goalClear(String command)
+int deviceReset(const char *eventName, const char *data)
 {
     EEPROM.clear();
     updateDisplay();
-    Particle.publish("device/clear", PRIVATE);
-    return 0;
+
+    Particle.publish("device/reset", PRIVATE);
+
+    WiFi.clearCredentials();
+    WiFi.disconnect();
+    WiFi.listen();
 }
 
 int goalReset(String command)
 {
-    goalToggle("0|0|0|0");
-    goalUpdate("0.00,0.00|0.00,0.00|0.00,0.00|0.00,0.00");
+    _goalToggle("0|0|0|0");
+    _goalUpdate("0.00,0.00|0.00,0.00|0.00,0.00|0.00,0.00");
+    setIsNew((uint8_t)ST_1B_EMPTY);
+
     updateDisplay();
-    Particle.publish("device/reset", PRIVATE);
+    Particle.publish("goal/reset", PRIVATE);
     return 0;
 }
 
@@ -302,12 +376,23 @@ int goalToggle(String command) // ex: 1|1|0|0
 {
     // TODO: add better validation since device is being contacted
     // directly from the client application
-    
+
+    _goalToggle(command);
+
+    setIsNew(0);
+    updateDisplay();
+
+    Particle.publish("goal/toggle", command, PRIVATE);
+    return 0;
+}
+
+void _goalToggle(String command)
+{
     char buffer[8];
     command.toCharArray(buffer, sizeof(buffer));
     for (int i = 0; i < 4; i++)
     {
-        int8_t enabled;
+        uint8_t enabled;
         if (i == 0)
         {
             enabled = atoi(strtok(buffer, "|"));
@@ -316,28 +401,35 @@ int goalToggle(String command) // ex: 1|1|0|0
         {
             enabled = atoi(strtok(NULL, "|"));
         }
-        
+
         int addr = i * ST_OFFSET;
         EEPROM.write(addr, enabled);
     }
-    
-    updateDisplay();
-    Particle.publish("device/toggle", command, PRIVATE);
-    return 0;
 }
 
 int goalUpdate(String command) // ex: 0.50,0.00|0.80,0.00|0.20,0.20|0.60,0.20
 {
     // TODO: add better validation since device is being contacted
     // directly from the client application
-    
+
+    _goalUpdate(command);
+
+    setIsNew(0);
+    updateDisplay();
+
+    Particle.publish("goal/update", command, PRIVATE);
+    return 0;
+}
+
+void _goalUpdate(String command)
+{
     bool full = false;
     char commandBuffer[40];
     command.toCharArray(commandBuffer, sizeof(commandBuffer));
     String values[4];
     for (int i = 0; i < 4; i++)
     {
-        char * goalAndPromise;
+        char *goalAndPromise;
         if (i == 0)
         {
             goalAndPromise = strtok(commandBuffer, "|");
@@ -346,16 +438,16 @@ int goalUpdate(String command) // ex: 0.50,0.00|0.80,0.00|0.20,0.20|0.60,0.20
         {
             goalAndPromise = strtok(NULL, "|");
         }
-        
+
         String temp = goalAndPromise;
         values[i] = temp;
     }
-    
+
     char valueBuffer[10];
     for (int i = 0; i < 4; i++)
     {
         values[i].toCharArray(valueBuffer, sizeof(valueBuffer));
-        
+
         int goalOffset = i * ST_OFFSET;
         float previousGoal = getGoalValue(i);
         float goal = min(atof(strtok(valueBuffer, ",")), 1.0);
@@ -364,29 +456,26 @@ int goalUpdate(String command) // ex: 0.50,0.00|0.80,0.00|0.20,0.20|0.60,0.20
 
         if (goal == 1.0 && previousGoal < 1.0)
         {
-            int8_t enabled = EEPROM.read(goalOffset);
+            uint8_t enabled = EEPROM.read(goalOffset);
             if (enabled)
             {
                 full = true;
             }
         }
-        
+
         float promise = min(atof(strtok(NULL, ",")), (1.0 - goal));
         int promiseAddr = goalOffset + ST_OFFSET_PROMISE;
         EEPROM.put(promiseAddr, promise);
     }
-    
+
     goalReached = full;
-    updateDisplay();
-    Particle.publish("device/update", command, PRIVATE);
-    return 0;
 }
 
 int goalColor(String command) // ex: 16763955|1073100|43087|14422029
 {
     // TODO: add better validation since device is being contacted
     // directly from the client application
-    
+
     char buffer[36];
     command.toCharArray(buffer, sizeof(buffer));
     for (int i = 0; i < 4; i++)
@@ -400,12 +489,14 @@ int goalColor(String command) // ex: 16763955|1073100|43087|14422029
         {
             color = atoi(strtok(NULL, "|"));
         }
-        
+
         int addr = (i * ST_OFFSET) + ST_OFFSET_COLOR;
         EEPROM.put(addr, color);
     }
-    
+
+    setIsNew(0);
     updateDisplay();
-    Particle.publish("device/color", command, PRIVATE);
+
+    Particle.publish("goal/color", command, PRIVATE);
     return 0;
 }
