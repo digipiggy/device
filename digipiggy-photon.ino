@@ -13,11 +13,17 @@
 #define ST_OFFSET_VALUE 1
 #define ST_OFFSET_PROMISE 5
 #define ST_OFFSET_COLOR 9
+#define ST_USE_ONOFF 802
+#define ST_ON_OFFSET 803
+#define ST_OFF_OFFSET 805
+#define ST_TIMEZONE_OFFSET 807
+#define ST_DST_OFFSET 808
+#define ST_MINUTE_OFFSET 1
 #define PIXEL_COLOR_DARK 0
 #define PIXEL_COLOR_DEFAULT 1073100
 
 //PRODUCT_ID();
-PRODUCT_VERSION(3);
+//PRODUCT_VERSION(4);
 SYSTEM_THREAD(ENABLED);
 
 Adafruit_NeoPixel strip(PIXEL_COUNT, PIXEL_PIN, PIXEL_TYPE);
@@ -29,8 +35,9 @@ uint32_t pixelColor[PIXEL_COUNT];
 bool isNew;
 bool goalReached;
 bool showingRainbow;
-
 // System Functions
+
+Timer timeSync(3600000, updateTime);
 
 void setup()
 {
@@ -44,12 +51,14 @@ void setup()
     Particle.function("toggle", goalToggle);
     Particle.function("update", goalUpdate);
     Particle.function("color", goalColor);
+    Particle.function("piggysleep", setPiggySleep);
 
+    timeSync.start();
     pinMode(CODE_PIN, OUTPUT);
     updateDisplay();
-
     strip.begin();
     strip.show();
+
 }
 
 void loop()
@@ -71,6 +80,10 @@ void loop()
         {
             showHello();
         }
+        else if (!showDisplay())
+        {
+            clearDisplay();
+        }
         else if (goalReached && !showingRainbow)
         {
             showRainbow();
@@ -82,7 +95,64 @@ void loop()
     }
 }
 
+
+bool isDst()
+{
+    int month = Time.month();
+    int day = Time.day();
+    int dow = Time.weekday() - 1;
+    //https://stackoverflow.com/questions/5590429/calculating-daylight-saving-time-from-only-date
+    //January, february, and december are out.
+    if (month < 3 || month > 11) { return false; }
+    //April to October are in
+    if (month > 3 && month < 11) { return true; }
+    int previousSunday = day - dow;
+    //In march, we are DST if our previous sunday was on or after the 8th.
+    if (month == 3) { return previousSunday >= 8; }
+    //In november we must be before the first sunday to be dst.
+    //That means the previous sunday must be before the 1st.
+    return previousSunday <= 0;
+}
+
+void updateTime()
+{
+    int8_t timezoneOffset = EEPROM.read(ST_TIMEZONE_OFFSET);
+    uint8_t observesDst = EEPROM.read(ST_DST_OFFSET);
+
+    Time.zone(timezoneOffset);
+    if (observesDst == 1 && isDst()) {
+        Time.beginDST();
+    } else {
+        Time.endDST();
+    }
+}
 // Display Functions
+
+bool showDisplay() {
+    uint8_t useOnOff = EEPROM.read(ST_USE_ONOFF);
+
+    uint8_t onHour = EEPROM.read(ST_ON_OFFSET);
+    uint8_t onMinute = EEPROM.read(ST_ON_OFFSET + ST_MINUTE_OFFSET);
+    uint8_t offHour = EEPROM.read(ST_OFF_OFFSET);
+    uint8_t offMinute = EEPROM.read(ST_OFF_OFFSET + ST_MINUTE_OFFSET);
+
+    int onMinutes = onHour * 60 + onMinute;
+    int offMinutes = offHour * 60 + offMinute;
+    int currentMinutes = Time.hour() * 60 + Time.minute();
+
+
+    if (useOnOff != 1) {
+        return true;
+    }
+
+    if (onMinutes <= currentMinutes && offMinutes > currentMinutes)
+    {
+        return true;
+    }
+
+    return false;
+
+}
 
 void showWarning(int code)
 {
@@ -347,8 +417,9 @@ uint32_t getGoalColor(int goalIndex)
     return value;
 }
 
-// Event & Function Handlers
 
+
+// Event & Function Handlers
 int deviceReset(const char *eventName, const char *data)
 {
     EEPROM.clear();
@@ -361,10 +432,58 @@ int deviceReset(const char *eventName, const char *data)
     WiFi.listen();
 }
 
+int setPiggySleep(String command) // 0|00:00|00:00|0|0 - enabled | ontime | offTime | timezoneOffset | observes dst
+{
+    _setPiggySleep(command);
+    updateTime();
+    Particle.publish("setPiggySleep", command, PRIVATE);
+
+    return 0;
+}
+
+void _setPiggySleep(String command)
+{
+    char buffer[20];
+    command.toCharArray(buffer, sizeof(buffer));
+
+    uint8_t useOnOff;
+    char * on;
+    char * off;
+    int8_t timezoneOffset;
+    uint8_t observesDst;
+
+    uint8_t onHour;
+    uint8_t onMinute;
+    uint8_t offHour;
+    uint8_t offMinute;
+
+    useOnOff = atoi(strtok(buffer, "|"));
+    on = strtok(NULL, "|");
+    off = strtok(NULL, "|");
+    timezoneOffset = atoi(strtok(NULL, "|"));
+    observesDst = atoi(strtok(NULL, "|"));
+
+    onHour = atoi(strtok(on, ":"));
+    onMinute = atoi(strtok(NULL, ":"));
+
+    offHour = atoi(strtok(off, ":"));
+    offMinute = atoi(strtok(NULL, ":"));
+
+    EEPROM.write(ST_USE_ONOFF, useOnOff);
+    EEPROM.write(ST_ON_OFFSET, onHour);
+    EEPROM.write(ST_ON_OFFSET + ST_MINUTE_OFFSET, onMinute);
+    EEPROM.write(ST_OFF_OFFSET, offHour);
+    EEPROM.write(ST_OFF_OFFSET + ST_MINUTE_OFFSET, offMinute);
+    EEPROM.write(ST_TIMEZONE_OFFSET, timezoneOffset);
+    EEPROM.write(ST_DST_OFFSET, observesDst);
+}
+
+
 int goalReset(String command)
 {
     _goalToggle("0|0|0|0");
     _goalUpdate("0.00,0.00|0.00,0.00|0.00,0.00|0.00,0.00");
+    _setPiggySleep("0|00:00|00:00|0|0");
     setIsNew((uint8_t)ST_1B_EMPTY);
 
     updateDisplay();
