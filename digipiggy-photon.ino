@@ -23,8 +23,9 @@
 #define PIXEL_COLOR_DEFAULT 1073100
 
 //PRODUCT_ID();
-//PRODUCT_VERSION(4);
+//PRODUCT_VERSION(5);
 SYSTEM_THREAD(ENABLED);
+SYSTEM_MODE(MANUAL);
 
 Adafruit_NeoPixel strip(PIXEL_COUNT, PIXEL_PIN, PIXEL_TYPE);
 
@@ -35,12 +36,37 @@ uint32_t pixelColor[PIXEL_COUNT];
 bool isNew;
 bool goalReached;
 bool showingRainbow;
+bool connectionTimedOut = false;
+
 // System Functions
 
 Timer timeSync(3600000, updateTime);
+Timer wifiTimeout(1000 * 30, wifiConnectionTimeout); //wifi times out after 30 seconds.
+Timer wifiRetryTimeout(1000 * 60 * 5, wifiRetry); //wifi retries after 5 mins if not connected
+
+//only needed for testing
+// void handle_all_the_events(system_event_t event, int param)
+// {
+//     if (event == setup_begin) Serial.println("setup_begin");
+//     if (event == setup_update) Serial.println("setup_update");
+//     if (event == setup_end) Serial.println("setup_end");
+
+//     if (param == cloud_status_connecting) Serial.println("cloud_status_connecting");
+//     if (param == cloud_status_connected) Serial.println("cloud_status_connected");
+//     if (param == cloud_status_disconnecting) Serial.println("cloud_status_disconnecting");
+//     if (param == cloud_status_disconnected) Serial.println("cloud_status_disconnected");
+// }
 
 void setup()
 {
+    //needed for testing
+    //delay(5000);
+    Serial.begin(9600);
+
+    System.on(network_status, wifiConnecting);
+    // System.on(all_events, handle_all_the_events);
+    WiFi.on();
+
     System.set(SYSTEM_CONFIG_SOFTAP_PREFIX, "DIGIPIGGY");
 
     String event = System.deviceID();
@@ -54,25 +80,40 @@ void setup()
     Particle.function("piggysleep", setPiggySleep);
 
     timeSync.start();
+    updateTime();
     pinMode(CODE_PIN, OUTPUT);
     updateDisplay();
     strip.begin();
     strip.show();
-
 }
+
 
 void loop()
 {
-    if (!Particle.connected())
+    if (connectionTimedOut)
     {
-        if (WiFi.listening())
+        if (!WiFi.listening())
         {
-            showListening();
+            wifiTimeout.stop();
+            wifiRetryTimeout.start();
+            Serial.println("listen");
+            connectionTimedOut = false;
+            WiFi.listen();
         }
-        else
-        {
-            showWarning(CODE_WIFI);
-        }
+    }
+
+    if (WiFi.listening())
+    {
+        showListening();
+    }
+    else if (WiFi.ready() && !Particle.connected() && !WiFi.listening())
+    {
+        wifiTimeout.stop();
+        wifiRetryTimeout.stop();
+        connectionTimedOut = false;
+        Serial.println("particle connecting");
+        Particle.connect();
+        delay(5000);
     }
     else
     {
@@ -93,6 +134,54 @@ void loop()
             showGoals();
         }
     }
+
+    if (Particle.connected())
+    {
+        Particle.process();
+    }
+}
+
+void wifiConnectionTimeout()
+{
+    connectionTimedOut = true;
+    Serial.println("timeout");
+}
+
+void wifiRetry()
+{
+    wifiRetryTimeout.stop();
+    Serial.println("retry");
+    WiFi.listen(false);
+    delay(1000);
+    connectionTimedOut = false;
+    wifiTimeout.start();
+    WiFi.connect();
+}
+
+void wifiConnecting(system_event_t event, int param)
+{
+    if (param == network_status_powering_on) Serial.println("network_status_powering_on");
+    if (param == network_status_on)
+    {
+        Serial.println("network_status_on");
+        if (connectionTimedOut) return;
+        if (WiFi.listening())
+        {
+            Serial.println("no longer listening");
+            WiFi.listen(false);
+            delay(1000);
+        }
+        wifiTimeout.start();
+        WiFi.connect();
+    }
+    if (param == network_status_powering_off)
+    {
+        //Particle.disconnect();
+        Serial.println("network_status_powering_off");
+    }
+    if (param == network_status_off) Serial.println("network_status_off");
+    if (param == network_status_connecting) Serial.println("network_status_connecting");
+    if (param == network_status_connected) Serial.println("network_status_connected");
 }
 
 
