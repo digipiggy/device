@@ -101,7 +101,6 @@ void loop()
             WiFi.listen();
         }
     }
-
     if (WiFi.listening())
     {
         showListening();
@@ -376,6 +375,9 @@ void updateDisplay()
 {
     isNew = getIsNew();
 
+    // This array is used to translate the LEDs that should be lit on the new V5 pigs
+    int flippedLEDIndexes[] = { 7, 6, 5, 4, 3, 2, 1, 0, 15, 14, 13, 12, 11, 10, 9, 8, 23, 22, 21, 20, 19, 18, 17, 16, 31, 30, 29, 28, 27, 26, 25, 24 };
+
     // clear all pixels
     for (int i = 0; i < PIXEL_COUNT; i++)
     {
@@ -427,8 +429,8 @@ void updateDisplay()
             int start = stepCount * step;
             for (int j = start; j < (start + level); j++)
             {
-                pixelDisplay[j] = true;
-                pixelColor[j] = color;
+                pixelDisplay[flippedLEDIndexes[j]] = true;
+                pixelColor[flippedLEDIndexes[j]] = color;
             }
 
             int promiseLevel = ceil(getGoalPromise(i) * step);
@@ -437,8 +439,8 @@ void updateDisplay()
                 int promiseStart = start + level;
                 for (int j = promiseStart; j < (promiseStart + promiseLevel); j++)
                 {
-                    pixelDimmed[j] = true;
-                    pixelColor[j] = color;
+                    pixelDimmed[flippedLEDIndexes[j]] = true;
+                    pixelColor[flippedLEDIndexes[j]] = color;
                 }
             }
 
