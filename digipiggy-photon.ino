@@ -343,11 +343,16 @@ uint32_t colorWheel(byte pos)
     }
 }
 
+// shows Wifi Bars on Pig LEDs
 void showListening()
 {
     clearDisplay();
 
-    int pixels[] = {0, 1, 8, 9, 10, 11, 16, 17, 18, 19, 20, 21, 24, 25, 26, 27, 28, 29, 30, 31};
+    // flipped wifi bar led indexes
+    int pixels[] = {7, 6, 15, 14, 13, 12, 23, 22, 21, 20, 19, 18, 31, 30, 29, 28, 27, 26, 25, 24};
+    // un-flipped wifi bar led indexes
+    // int pixels[] = {0, 1, 8, 9, 10, 11, 16, 17, 18, 19, 20, 21, 24, 25, 26, 27, 28, 29, 30, 31};
+    
     for (int i = 0; i < arraySize(pixels); i++)
     {
         strip.setPixelColor(pixels[i], (uint32_t)PIXEL_COLOR_DEFAULT);
